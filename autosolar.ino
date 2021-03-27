@@ -20,16 +20,17 @@ const int resolution = 8;
 int MAX_PWM_VOLTAGE = 255;
 
 /* Constants */
-const int LDRbuffer = 10;   // adjust based on LDR input fluctuation
-const int int_buffer = 10;  // adjust based on INA input fluctuation
+const int LDRbuffer = 10;       // adjust based on LDR input fluctuation
+const int LDR_max_diff = 100;   // adjust based on LDR input fluctuation
+const int int_buffer = 10;      // adjust based on INA input fluctuation
 
 /* Intensity */
 float intensity = 0;
 float last_intensity = 0;
 
 /* LDR input pins */
-int ldrtop = 32;               // top LDR input pin
-int ldrbtm = 33;               // bottom LDR input pin
+int ldrtop = 32;              // top LDR input pin
+int ldrbtm = 33;              // bottom LDR input pin
 int ldrlt = 34;               // left LDR input pin
 int ldrrt = 39;               // right LDR input pin
 
@@ -44,6 +45,8 @@ float shuntvoltage = 0;
 float current_mA = 0;
 
 /* Adjustment indicators */
+int UDdiff = 0;
+int LRdiff = 0;
 int UDadj = 0;
 int LRadj = 0;
 
@@ -53,6 +56,12 @@ ESP32Encoder encoderz;
 
 /* Define INA219 */
 Adafruit_INA219 ina219;
+
+
+void gotosleep() {
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_deep_sleep_start();
+}
 
 void automaticsolartracker() {      // main function
 
@@ -67,34 +76,39 @@ void automaticsolartracker() {      // main function
   current_mA = ina219.getCurrent_mA();
 
   // calculation
-  intensity = shuntvoltage * current_mA;
+  //intensity = shuntvoltage * current_mA;
   UDdiff = ldr_top - ldr_btm;
   LRdiff = ldr_lt - ldr_rt;
+
+  // Skipping
+  if (UDdiff > LDR_max_diff || LRdiff > LDR_max_diff) {     // ESP32 will go to sleep is U/D or L/R LDR input difference too large
+    gotosleep();
+  }
 
   // adjustment about x-axis
   if (abs(UDdiff) >= LDRbuffer) {
     if (UDdiff > 0) {                             // if upper LDR sensed more light then rotate panel upward
-    ledcWrite(ledChannel_1, LOW);
-    ledcWrite(ledChannel_2, MAX_PWM_VOLTAGE);
+      ledcWrite(motorChannel_1, LOW);
+      ledcWrite(motorChannel_2, MAX_PWM_VOLTAGE);
     }
     else if (UDdiff < 0) {                        // if lower LDR sensed more light then rotate panel downward
-    ledcWrite(ledChannel_1, MAX_PWM_VOLTAGE);
-    ledcWrite(ledChannel_2, LOW);
+      ledcWrite(motorChannel_1, MAX_PWM_VOLTAGE);
+      ledcWrite(motorChannel_2, LOW);
     }
   }
   else {
     UDadj = 0;      // if difference within threshold, then no adjustment is needed
   }
-  
+
   // adjustment about z-axis
   if (abs(LRdiff) >= LDRbuffer) {
     if (LRdiff > 0) {                             // if left LDR sensed more light then rotate panel left
-    ledcWrite(ledChannel_3, LOW);
-    ledcWrite(ledChannel_4, MAX_PWM_VOLTAGE);
+      ledcWrite(motorChannel_3, LOW);
+      ledcWrite(motorChannel_4, MAX_PWM_VOLTAGE);
     }
     else if (LRdiff < 0) {                        // if right LDR sensed more light then rotate panel right
-    ledcWrite(ledChannel_3, LOW);
-    ledcWrite(ledChannel_4, MAX_PWM_VOLTAGE);
+      ledcWrite(motorChannel_3, MAX_PWM_VOLTAGE);
+      ledcWrite(motorChannel_4, LOW);
     }
   }
   else {
@@ -102,12 +116,10 @@ void automaticsolartracker() {      // main function
   }
 
   // ESP32 go to sleep if no adjustment is needed
-  if (UDadj == 0 && LRadj == 0){
-    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-    esp_deep_sleep_start();
+  if (UDadj == 0 && LRadj == 0) {
+    gotosleep();
   }
 }
-
 
 
 void setup() {
@@ -127,11 +139,12 @@ void setup() {
   ledcSetup(motorChannel_4, freq, resolution);
 
   /* attach the channel to the GPIO to be controlled */
-  ledcAttachPin(BIN_1, motorChannel_1); 
+  ledcAttachPin(BIN_1, motorChannel_1);
   ledcAttachPin(BIN_2, motorChannel_2);
   ledcAttachPin(AIN_1, motorChannel_3);
   ledcAttachPin(AIN_2, motorChannel_4);
 }
+
 
 void loop() {
   automaticsolartracker();
